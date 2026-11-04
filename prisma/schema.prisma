@@ -1,34 +1,58 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "sqlite"
   url      = "file:dev.sqlite"
 }
 
+generator client {
+  provider = "prisma-client-js"
+}
+
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  isAnonymous         Boolean   @default(false)
+  accessToken         String
+  scope               String?
+  expires             DateTime?
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean   @default(false)
+  emailVerified       Boolean   @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+model AbandonedCart {
+  id             String    @id @default(uuid())
+  shop           String
+  checkoutId     String    @unique
+  customerName   String?
+  phone          String
+  totalPrice     String
+  checkoutUrl    String
+  status         String    @default("PENDING") // PENDING, SENT, RECOVERED
+  createdAt      DateTime  @default(now())
+
+  // --- NEW FIELDS FOR ANALYTICS & SEQUENCES (SAFE ADDITIONS) ---
+  recoveredAt    DateTime? // Tracks exact conversion time
+  recoverySource String?   @default("MANUAL") // MANUAL or AUTOMATED
+  reminderCount  Int?      @default(0) // Tracks follow-up count
+}
+
+model AppSettings {
+  shop               String  @id
+  whatsappToken      String?
+  phoneNumberId      String?
+  messageTemplate    String  @default("Hi {{name}}, we noticed you left some great items in your cart at {{shop}}. Complete your order here: {{url}}")
+  isEnabled          Boolean @default(true)
+
+  // --- NEW SETTINGS FOR DISCOUNTS & AUTOMATION (SAFE ADDITIONS) ---
+  discountPercentage Int?     @default(10) // Default discount code %
+  enableAutomation   Boolean? @default(false) // Toggle multi-step reminders
 }

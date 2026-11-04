@@ -1,0 +1,29 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "5253e64ce68b882f04a6c4fef8e327cf"
+name = "RecoverCart"
+application_url = "https://suspension-exams-highs-downloading.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-10"
+
+[webhooks.privacy_compliance]
+customer_data_request_url = "https://suspension-exams-highs-downloading.trycloudflare.com/api/webhooks"
+customer_deletion_url = "https://suspension-exams-highs-downloading.trycloudflare.com/api/webhooks"
+shop_deletion_url = "https://suspension-exams-highs-downloading.trycloudflare.com/api/webhooks"
+
+[access_scopes]
+scopes = "read_checkouts,read_orders,write_checkouts"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://suspension-exams-highs-downloading.trycloudflare.com/auth/callback",
+  "https://suspension-exams-highs-downloading.trycloudflare.com/auth/shopify/callback",
+  "https://suspension-exams-highs-downloading.trycloudflare.com/api/auth/callback"
+]
