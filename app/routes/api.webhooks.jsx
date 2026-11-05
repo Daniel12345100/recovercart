@@ -14,18 +14,26 @@ export const action = async ({ request }) => {
   try {
     webhookContext = await authenticate.webhook(request);
   } catch (error) {
+    console.error("Webhook authentication failed:", error);
     // CRITICAL: Shopify's automated test bot requires an explicit HTTP 401 on signature mismatch
     return new Response("Unauthorized", { status: 401 });
   }
 
   const { topic, shop, payload } = webhookContext;
 
-  // Acknowledge mandatory privacy compliance webhooks instantly
+  // Normalize topic to handle both slash and underscore formats from Shopify
+  const normalizedTopic = topic ? topic.toLowerCase().replace("_", "/") : "";
+
+  // Acknowledge mandatory privacy compliance webhooks instantly with 200 OK
   if (
+    normalizedTopic === "shop/redact" ||
+    normalizedTopic === "customers/data_request" ||
+    normalizedTopic === "customers/redact" ||
     topic === "CUSTOMERS_DATA_REQUEST" ||
     topic === "CUSTOMERS_REDACT" ||
     topic === "SHOP_REDACT"
   ) {
+    console.log(`Acknowledged privacy webhook [${topic}] for shop: ${shop}`);
     return new Response("OK", { status: 200 });
   }
 
@@ -74,7 +82,7 @@ export const action = async ({ request }) => {
       },
     });
   } catch (dbError) {
-    console.error("Database error:", dbError.message);
+    console.error("Database error in webhook handler:", dbError.message);
   }
 
   return new Response("OK", { status: 200 });

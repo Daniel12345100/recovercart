@@ -7,6 +7,25 @@ export async function action({ request }) {
       return new Response(JSON.stringify({ message: "Empty body" }), { status: 200 });
     }
 
+    const topic = (request.headers.get("x-shopify-topic") || "").toLowerCase().replace("_", "/");
+    const shop = request.headers.get("x-shopify-shop-domain") || "recovercart-test-store.myshopify.com";
+
+    // CRITICAL: Immediately acknowledge mandatory privacy compliance webhooks with 200 OK
+    if (
+      topic === "shop/redact" ||
+      topic === "customers/data_request" ||
+      topic === "customers/redact" ||
+      topic === "privacy/customers_data_request" ||
+      topic === "privacy/customers_redact" ||
+      topic === "privacy/shop_redact"
+    ) {
+      console.log(`[RecoverCart] Acknowledged compliance webhook [${topic}] for ${shop}`);
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     let payload = {};
     try {
       payload = JSON.parse(rawBody);
@@ -15,16 +34,13 @@ export async function action({ request }) {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    const topic = request.headers.get("x-shopify-topic") || "checkouts/create";
-    const shop = request.headers.get("x-shopify-shop-domain") || "recovercart-test-store.myshopify.com";
-
     const customerName = payload.customer 
       ? `${payload.customer.first_name || ""} ${payload.customer.last_name || ""}`.trim() 
-      : payload.billing_address?.name || "Daniel Kangozhi";
+      : payload.billing_address?.name || "Valued Customer";
     
-    const customerEmail = payload.email || payload.contact_email || "live-test@example.com";
-    const customerPhone = payload.phone || payload.shipping_address?.phone || payload.billing_address?.phone || "+260966479464";
-    const totalPrice = payload.total_price || "749.95";
+    const customerEmail = payload.email || payload.contact_email || "test@example.com";
+    const customerPhone = payload.phone || payload.shipping_address?.phone || payload.billing_address?.phone || "+1234567890";
+    const totalPrice = payload.total_price || "0.00";
     const currency = payload.currency || "USD";
 
     const lineItems = payload.line_items 
