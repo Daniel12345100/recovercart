@@ -20,11 +20,22 @@ import {
 import { useState } from "react";
 
 export async function loader({ request }) {
-  const { session, billing } = await authenticate.admin(request);
-  const shop = session.shop;
+  let session = null;
+  let billing = null;
+  
+  try {
+    const authResult = await authenticate.admin(request);
+    session = authResult.session;
+    billing = authResult.billing;
+  } catch (authError) {
+    console.error("Authentication error in loader:", authError?.message);
+    throw data({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const shop = session?.shop || "unknown-shop";
 
   // Graceful billing enforcement: prevents hard 500 crashes during reviewer bot testing
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "production" && billing) {
     try {
       await billing.require({
         plans: [MONTHLY_PLAN],
@@ -44,37 +55,45 @@ export async function loader({ request }) {
   let carts = [];
 
   try {
-    settings = await prisma.appSettings.findUnique({
-      where: { shop },
-    });
-
-    carts = await prisma.abandonedCart.findMany({
-      where: { shop },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
+    if (prisma?.appSettings) {
+      settings = await prisma.appSettings.findUnique({
+        where: { shop },
+      });
+    }
   } catch (dbError) {
-    console.error("Database query error in app loader:", dbError?.message);
+    console.warn("AppSettings table not ready yet or query failed:", dbError?.message);
+  }
+
+  try {
+    if (prisma?.abandonedCart) {
+      carts = await prisma.abandonedCart.findMany({
+        where: { shop },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+    }
+  } catch (dbError) {
+    console.warn("AbandonedCart table not ready yet or query failed:", dbError?.message);
   }
 
   // Calculate Executive Analytics safely
   const totalCartsCount = carts.length;
 
   const recoveredCarts = carts.filter(
-    (c) => c.status === "recovered" || c.status === "RECOVERED"
+    (c) => c && (c.status === "recovered" || c.status === "RECOVERED")
   );
   const recoveredCount = recoveredCarts.length;
 
   const totalRecoveredRevenue = recoveredCarts.reduce(
-    (acc, c) => acc + (parseFloat(c.totalPrice) || 0),
+    (acc, c) => acc + (parseFloat(c?.totalPrice) || 0),
     0
   );
 
   const pendingCarts = carts.filter(
-    (c) => c.status !== "recovered" && c.status !== "RECOVERED"
+    (c) => c && c.status !== "recovered" && c.status !== "RECOVERED"
   );
   const totalAmountAtRisk = pendingCarts.reduce(
-    (acc, c) => acc + (parseFloat(c.totalPrice) || 0),
+    (acc, c) => acc + (parseFloat(c?.totalPrice) || 0),
     0
   );
 
@@ -89,7 +108,7 @@ export async function loader({ request }) {
         "Hi {{name}}, we noticed you left items in your cart at {{shop}}. Complete your order here with 10% off: {{url}}",
       isEnabled: true,
     },
-    carts,
+    carts: carts || [],
     metrics: {
       totalCartsCount,
       recoveredCount,
@@ -107,17 +126,27 @@ export async function loader({ request }) {
 }
 
 export async function action({ request }) {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
+  let session = null;
+  try {
+    const authResult = await authenticate.admin(request);
+    session = authResult.session;
+  } catch (authError) {
+    console.error("Authentication error in action:", authError?.message);
+    return data({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const shop = session?.shop || "unknown-shop";
   const formData = await request.formData();
   const actionType = formData.get("actionType");
 
   if (actionType === "deleteCart") {
     const cartId = formData.get("cartId");
     try {
-      await prisma.abandonedCart.delete({
-        where: { id: cartId },
-      });
+      if (prisma?.abandonedCart && cartId) {
+        await prisma.abandonedCart.delete({
+          where: { id: cartId },
+        });
+      }
     } catch (err) {
       console.error("Failed to delete cart:", err?.message);
     }
@@ -127,17 +156,19 @@ export async function action({ request }) {
   if (actionType === "addSampleCart") {
     const sampleId = `cart-${Date.now()}`;
     try {
-      await prisma.abandonedCart.create({
-        data: {
-          shop,
-          checkoutId: sampleId,
-          customerName: "Daniel Kangozhi",
-          phone: "260966479464",
-          totalPrice: "749.95",
-          checkoutUrl: "https://recovercart-test-store.myshopify.com",
-          status: "abandoned",
-        },
-      });
+      if (prisma?.abandonedCart) {
+        await prisma.abandonedCart.create({
+          data: {
+            shop,
+            checkoutId: sampleId,
+            customerName: "Daniel Kangozhi",
+            phone: "260966479464",
+            totalPrice: "749.95",
+            checkoutUrl: "https://recovercart-test-store.myshopify.com",
+            status: "abandoned",
+          },
+        });
+      }
     } catch (err) {
       console.error("Failed to add sample cart:", err?.message);
     }
@@ -149,49 +180,56 @@ export async function action({ request }) {
   const discountPercentage = formData.get("discountPercentage") || "10";
 
   const discountTitle = `RECOVER${discountPercentage}`;
+  
+  // Safely attempt discount creation via admin graphql
   try {
-    await admin.graphql(
-      `#graphql
-      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
-        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-          codeDiscountNode {
-            id
+    const { admin } = await authenticate.admin(request);
+    if (admin) {
+      await admin.graphql(
+        `#graphql
+        mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+          discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+            codeDiscountNode {
+              id
+            }
+            userErrors {
+              field
+              message
+            }
           }
-          userErrors {
-            field
-            message
-          }
-        }
-      }`,
-      {
-        variables: {
-          basicCodeDiscount: {
-            title: discountTitle,
-            code: discountTitle,
-            startsAt: new Date().toISOString(),
-            customerGets: {
-              value: {
-                percentage: parseInt(discountPercentage, 10) / 100,
+        }`,
+        {
+          variables: {
+            basicCodeDiscount: {
+              title: discountTitle,
+              code: discountTitle,
+              startsAt: new Date().toISOString(),
+              customerGets: {
+                value: {
+                  percentage: parseInt(discountPercentage, 10) / 100,
+                },
+                items: {
+                  all: true,
+                },
               },
-              items: {
-                all: true,
-              },
+              appliesOncePerCustomer: true,
             },
-            appliesOncePerCustomer: true,
           },
-        },
-      }
-    );
+        }
+      );
+    }
   } catch (error) {
     console.log("Discount creation notice:", error?.message);
   }
 
   try {
-    await prisma.appSettings.upsert({
-      where: { shop },
-      update: { messageTemplate, isEnabled },
-      create: { shop, messageTemplate, isEnabled },
-    });
+    if (prisma?.appSettings) {
+      await prisma.appSettings.upsert({
+        where: { shop },
+        update: { messageTemplate, isEnabled },
+        create: { shop, messageTemplate, isEnabled },
+      });
+    }
   } catch (err) {
     console.error("Failed to update app settings:", err?.message);
   }
